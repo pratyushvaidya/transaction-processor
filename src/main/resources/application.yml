@@ -1,0 +1,29 @@
+spring:
+  application:
+    name: txn-processor
+  datasource:
+    url: jdbc:h2:mem:transactiondb
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    open-in-view: false
+  h2:
+    console:
+      enabled: false
+
+txn:
+  retry:
+    delay: 30s
+    max-attempts: 3
+  pending:
+    timeout: 5m
+  processing:
+    lease-timeout: 2m
+  scheduler:
+    poll-interval: 5s
+    enabled: true
+  source:
+    file: classpath:sample/transactions.json

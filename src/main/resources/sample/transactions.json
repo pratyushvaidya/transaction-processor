@@ -1,0 +1,12 @@
+[
+  {
+    "transactionId": "sample-1",
+    "requestId": "sample-request-1",
+    "accountId": "sample-account",
+    "transactionType": "CREDIT",
+    "amount": "25.00",
+    "currency": "USD",
+    "sequenceNumber": "1"
+  },
+  null
+]
