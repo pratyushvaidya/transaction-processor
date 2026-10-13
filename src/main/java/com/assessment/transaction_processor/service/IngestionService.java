@@ -21,8 +21,10 @@ import java.math.RoundingMode;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -43,6 +45,7 @@ public class IngestionService {
     private final TransactionValidator validator;
     private final Clock clock;
     private final TransactionTemplate transactionTemplate;
+    private final ProcessingEngine processingEngine;
 
     public IngestionService(
             AccountRepository accountRepository,
@@ -51,7 +54,8 @@ public class IngestionService {
             RejectedRecordRepository rejectedRecordRepository,
             TransactionValidator validator,
             Clock clock,
-            PlatformTransactionManager transactionManager) {
+            PlatformTransactionManager transactionManager,
+            ProcessingEngine processingEngine) {
         this.accountRepository = accountRepository;
         this.transactionRepository = transactionRepository;
         this.duplicateLogRepository = duplicateLogRepository;
@@ -59,6 +63,7 @@ public class IngestionService {
         this.validator = validator;
         this.clock = clock;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
+        this.processingEngine = processingEngine;
     }
 
     public IngestionOutcome ingest(RawTransactionRequest request) {
@@ -71,9 +76,15 @@ public class IngestionService {
 
     public List<IngestionOutcome> ingestBatch(List<RawTransactionRequest> requests) {
         List<IngestionOutcome> outcomes = new ArrayList<>(requests.size());
+        Set<String> affectedAccounts = new LinkedHashSet<>();
         for (RawTransactionRequest request : requests) {
             outcomes.add(ingest(request));
+            String accountId = nonBlank(request.accountId());
+            if (accountId != null && accountId.matches(ACCOUNT_ID_PATTERN)) {
+                affectedAccounts.add(accountId);
+            }
         }
+        affectedAccounts.forEach(processingEngine::drainAccount);
         return List.copyOf(outcomes);
     }
 
@@ -155,11 +166,12 @@ public class IngestionService {
             throw new DataIntegrityViolationException("Unable to persist malformed transaction");
         }
         return transactionTemplate.execute(status -> {
-            TransactionRecord original = transactionRepository.findById(transactionId)
-                    .orElseThrow(() -> new DataIntegrityViolationException(
-                            "Transaction constraint violation was not an idempotency collision"));
-            saveDuplicateLog(request, original);
-            return IngestionOutcome.DUPLICATE;
+            Optional<TransactionRecord> original = transactionRepository.findById(transactionId);
+            if (original.isPresent()) {
+                saveDuplicateLog(request, original.get());
+                return IngestionOutcome.DUPLICATE;
+            }
+            return ingestInTransaction(request);
         });
     }
 
