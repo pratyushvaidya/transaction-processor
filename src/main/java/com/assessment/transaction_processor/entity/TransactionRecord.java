@@ -76,6 +76,9 @@ public class TransactionRecord {
     @Column(name = "processed_at")
     private Instant processedAt;
 
+    @Column(name = "last_error_message", length = 128)
+    private String lastErrorMessage;
+
     protected TransactionRecord() {
     }
 
@@ -167,6 +170,10 @@ public class TransactionRecord {
         return processedAt;
     }
 
+    public String getLastErrorMessage() {
+        return lastErrorMessage;
+    }
+
     public void markProcessing(Instant at) {
         status = TransactionStatus.PROCESSING;
         pendingReason = null;
@@ -177,6 +184,8 @@ public class TransactionRecord {
         status = TransactionStatus.FAILED;
         pendingReason = null;
         failureReason = reason;
+        nextAttemptAt = null;
+        lastErrorMessage = null;
         updatedAt = at;
     }
 
@@ -184,11 +193,35 @@ public class TransactionRecord {
         status = TransactionStatus.PROCESSED;
         pendingReason = null;
         failureReason = null;
+        lastErrorMessage = null;
+        nextAttemptAt = null;
         processedAt = at;
         updatedAt = at;
     }
 
     public void setNextAttemptAt(Instant nextAttemptAt) {
         this.nextAttemptAt = nextAttemptAt;
+    }
+
+    public void incrementAttemptCount() {
+        attemptCount = Math.addExact(attemptCount, 1);
+    }
+
+    public void markAwaitingRetry(Instant retryAt, Instant at, String safeMessage) {
+        status = TransactionStatus.PENDING;
+        pendingReason = PendingReason.AWAITING_RETRY;
+        failureReason = null;
+        nextAttemptAt = retryAt;
+        lastErrorMessage = safeMessage;
+        updatedAt = at;
+    }
+
+    public void markReclaimedForRetry(Instant at) {
+        incrementAttemptCount();
+        markAwaitingRetry(at, at, null);
+    }
+
+    public void setLastErrorMessage(String lastErrorMessage) {
+        this.lastErrorMessage = lastErrorMessage;
     }
 }

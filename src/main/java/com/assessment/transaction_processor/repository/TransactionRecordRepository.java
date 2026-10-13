@@ -5,6 +5,7 @@ import com.assessment.transaction_processor.enums.PendingReason;
 import com.assessment.transaction_processor.enums.TransactionStatus;
 import java.util.List;
 import java.util.Optional;
+import java.time.Instant;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -20,4 +21,26 @@ public interface TransactionRecordRepository extends JpaRepository<TransactionRe
     List<String> findDistinctAccountIdsByStatusAndPendingReason(
             @Param("status") TransactionStatus status,
             @Param("pendingReason") PendingReason pendingReason);
+
+    @Query("select distinct transaction.accountId from TransactionRecord transaction "
+            + "where transaction.status = :status and transaction.pendingReason = :pendingReason "
+            + "and transaction.nextAttemptAt <= :now")
+    List<String> findDueRetryAccountIds(
+            @Param("status") TransactionStatus status,
+            @Param("pendingReason") PendingReason pendingReason,
+            @Param("now") Instant now);
+
+    @Query("select transaction.transactionId from TransactionRecord transaction "
+            + "where transaction.status = :status and transaction.pendingReason = :pendingReason "
+            + "and transaction.receivedAt < :cutoff")
+    List<String> findExpiredPendingIds(
+            @Param("status") TransactionStatus status,
+            @Param("pendingReason") PendingReason pendingReason,
+            @Param("cutoff") Instant cutoff);
+
+    @Query("select transaction.transactionId from TransactionRecord transaction "
+            + "where transaction.status = :status and transaction.updatedAt < :cutoff")
+    List<String> findStuckProcessingIds(
+            @Param("status") TransactionStatus status,
+            @Param("cutoff") Instant cutoff);
 }

@@ -25,5 +25,8 @@ txn:
   scheduler:
     poll-interval: 5s
     enabled: true
+  fault-injection:
+    enabled: false
+    failures: {}
   source:
     file: classpath:sample/transactions.json

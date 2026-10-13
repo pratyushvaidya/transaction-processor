@@ -74,7 +74,46 @@ For account `ACC-201`, suppose sequence 2 is a `DEBIT` of 40 and sequence 1 is a
 
 Each processing step takes a pessimistic write lock on its account row before reading the cursor or current sequence slot. That serializes competing drains for one account while allowing different accounts to progress independently. The account's optimistic `@Version` remains a second defence against updates that bypass the row-locking processing path.
 
+## Resilience
+
+```mermaid
+stateDiagram-v2
+    [*] --> PENDING_SEQUENCE: accepted / waiting for earlier sequence
+    PENDING_SEQUENCE: PENDING / AWAITING_SEQUENCE
+    PENDING_RETRY: PENDING / AWAITING_RETRY
+    PROCESSING --> PROCESSED: balance and ledger committed
+    PROCESSING --> FAILED: permanent business outcome or retries exhausted
+    PROCESSING --> PENDING_RETRY: transient failure / rollback
+    PENDING_RETRY --> PROCESSING: retry becomes due
+    PENDING_SEQUENCE --> PROCESSING: reaches account cursor
+    PENDING_SEQUENCE --> FAILED: pending timeout
+    PROCESSED --> [*]
+    FAILED --> [*]
+    [*] --> DUPLICATE: existing transactionId
+    DUPLICATE --> [*]: duplicate request logged
+```
+
+1. A step updates the balance and inserts the ledger entry in one database transaction; configured or unexpected runtime failures roll back both effects.
+2. After rollback, the engine records the transient failure in a new transaction, increments the persisted attempt count, and sets `nextAttemptAt` from the configured retry delay.
+3. The retry job drains accounts whose retry time is due. A successful attempt writes one ledger entry; exhausting the configured total attempts marks the transaction `FAILED/RETRIES_EXHAUSTED` and advances the cursor.
+
+| Failure reason | Classification | Effect |
+|---|---|---|
+| `VALIDATION_FAILED` | Permanent | Retains the sequence slot as a terminal failure |
+| `INSUFFICIENT_FUNDS` | Permanent | No balance change; advances the cursor |
+| `MALFORMED` | Permanent | Rejected without owning a sequence slot |
+| `STALE_SEQUENCE` | Permanent | Rejected without owning a sequence slot |
+| `SEQUENCE_CONFLICT` | Permanent | Rejected without owning a sequence slot |
+| `SEQUENCE_TIMEOUT` | Permanent | Retains its slot; the cursor skips it when reached |
+| `RETRIES_EXHAUSTED` | Terminal after transient errors | Retains its slot and advances the cursor when exhausted at the cursor |
+| Transient internal error | Retryable | Rolls back processing and waits for `nextAttemptAt` |
+
+A retry-pending transaction intentionally blocks later sequence numbers for its account. With a fixed retry delay, the configured limit bounds this blocking to at most `max-attempts × delay`; after exhaustion the cursor can continue.
+
+Pending sequence timeout is measured from `receivedAt`. A timed-out request becomes `FAILED/SEQUENCE_TIMEOUT` in its original slot. Empty sequence gaps are never auto-skipped: progress waits for a transaction or an explicit terminal record for every preceding slot.
+
 ## Progress log
 
 - Step 1: Added the Maven/Spring Boot 4 foundation, configuration and clock, entities and repositories, input validation and transaction sources, idempotent ingestion, and focused tests under `com.assessment.transaction_processor`.
-- Step 2: Added the sequence gate, account-locked atomic processing step, unique ledger entries, per-account drain engine, post-commit batch draining, and H2/unit/concurrency coverage. Retries, fault injection, schedulers, reports, and REST endpoints remain out of scope.
+- Step 2: Added the sequence gate, account-locked atomic processing step, unique ledger entries, per-account drain engine, post-commit batch draining, and H2/unit/concurrency coverage; resilience followed in Step 3.
+- Step 3: Added configurable transactional fault injection, persisted retry attempts and safe failure metadata, retry exhaustion handling, direct-callable resilience jobs with conditional scheduled wrappers, timeout and stuck-processing recovery, and deterministic retry/rollback tests. Fault injection, retries, and recovery jobs are now implemented; reports and REST endpoints remain out of scope.

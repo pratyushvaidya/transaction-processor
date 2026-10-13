@@ -1,6 +1,7 @@
 package com.assessment.transaction_processor.config;
 
 import java.time.Duration;
+import java.util.Map;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "txn")
@@ -9,7 +10,8 @@ public record TxnProperties(
         Pending pending,
         Processing processing,
         Scheduler scheduler,
-        Source source) {
+        Source source,
+        FaultInjection faultInjection) {
 
     public record Retry(Duration delay, int maxAttempts) {
     }
@@ -24,5 +26,11 @@ public record TxnProperties(
     }
 
     public record Source(String file) {
+    }
+
+    public record FaultInjection(boolean enabled, Map<String, Integer> failures) {
+        public FaultInjection {
+            failures = Map.copyOf(failures);
+        }
     }
 }
