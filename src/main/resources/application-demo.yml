@@ -1,0 +1,10 @@
+txn:
+  retry:
+    delay: 2s
+    max-attempts: 3
+  pending:
+    timeout: 10s
+  fault-injection:
+    enabled: true
+    failures:
+      TXN-2005: 1

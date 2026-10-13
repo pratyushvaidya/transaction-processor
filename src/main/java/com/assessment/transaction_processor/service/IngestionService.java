@@ -2,6 +2,7 @@ package com.assessment.transaction_processor.service;
 
 import com.assessment.transaction_processor.dto.RawTransactionRequest;
 import com.assessment.transaction_processor.dto.ValidationResult;
+import com.assessment.transaction_processor.observability.TxnEventLogger;
 import com.assessment.transaction_processor.entity.Account;
 import com.assessment.transaction_processor.entity.DuplicateRequestLog;
 import com.assessment.transaction_processor.entity.RejectedRecord;
@@ -46,6 +47,7 @@ public class IngestionService {
     private final Clock clock;
     private final TransactionTemplate transactionTemplate;
     private final ProcessingEngine processingEngine;
+    private final TxnEventLogger eventLogger;
 
     public IngestionService(
             AccountRepository accountRepository,
@@ -55,7 +57,8 @@ public class IngestionService {
             TransactionValidator validator,
             Clock clock,
             PlatformTransactionManager transactionManager,
-            ProcessingEngine processingEngine) {
+            ProcessingEngine processingEngine,
+            TxnEventLogger eventLogger) {
         this.accountRepository = accountRepository;
         this.transactionRepository = transactionRepository;
         this.duplicateLogRepository = duplicateLogRepository;
@@ -64,14 +67,18 @@ public class IngestionService {
         this.clock = clock;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.processingEngine = processingEngine;
+        this.eventLogger = eventLogger;
     }
 
     public IngestionOutcome ingest(RawTransactionRequest request) {
+        IngestionOutcome outcome;
         try {
-            return transactionTemplate.execute(status -> ingestInTransaction(request));
+            outcome = transactionTemplate.execute(status -> ingestInTransaction(request));
         } catch (DataIntegrityViolationException exception) {
-            return recordDuplicateAfterRace(request);
+            outcome = recordDuplicateAfterRace(request);
         }
+        eventLogger.received(request, eventFor(outcome), outcome.name());
+        return outcome;
     }
 
     public List<IngestionOutcome> ingestBatch(List<RawTransactionRequest> requests) {
@@ -85,7 +92,17 @@ public class IngestionService {
             }
         }
         affectedAccounts.forEach(processingEngine::drainAccount);
+        eventLogger.batchSummary(outcomes.size(), "COMPLETED");
         return List.copyOf(outcomes);
+    }
+
+    private static String eventFor(IngestionOutcome outcome) {
+        return switch (outcome) {
+            case PENDING -> "TXN_BUFFERED";
+            case FAILED -> "TXN_FAILED";
+            case DUPLICATE -> "TXN_DUPLICATE";
+            case REJECTED_MALFORMED, REJECTED_STALE_SEQUENCE, REJECTED_SEQUENCE_CONFLICT -> "TXN_REJECTED";
+        };
     }
 
     private IngestionOutcome ingestInTransaction(RawTransactionRequest request) {

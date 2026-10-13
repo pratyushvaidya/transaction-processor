@@ -92,4 +92,20 @@ public class RejectedRecord {
     public Instant getReceivedAt() {
         return receivedAt;
     }
+
+    public RejectedRecordView toView() {
+        return new RejectedRecordView(
+                id, transactionId, requestId, accountId, sequenceNumber, failureReason, safeMessage, receivedAt);
+    }
+
+    public record RejectedRecordView(
+            Long id,
+            String transactionId,
+            String requestId,
+            String accountId,
+            Long sequenceNumber,
+            FailureReason failureReason,
+            String safeMessage,
+            Instant receivedAt) {
+    }
 }

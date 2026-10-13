@@ -6,6 +6,7 @@ import com.assessment.transaction_processor.entity.TransactionRecord;
 import com.assessment.transaction_processor.enums.FailureReason;
 import com.assessment.transaction_processor.enums.PendingReason;
 import com.assessment.transaction_processor.enums.TransactionStatus;
+import com.assessment.transaction_processor.observability.TxnEventLogger;
 import com.assessment.transaction_processor.repository.AccountRepository;
 import com.assessment.transaction_processor.repository.TransactionRecordRepository;
 import java.time.Clock;
@@ -15,6 +16,8 @@ import java.util.Optional;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 @Service
 public class ResilienceJobs {
@@ -25,6 +28,7 @@ public class ResilienceJobs {
     private final TxnProperties properties;
     private final Clock clock;
     private final TransactionTemplate transactionTemplate;
+    private final TxnEventLogger eventLogger;
 
     public ResilienceJobs(
             TransactionRecordRepository transactionRepository,
@@ -32,13 +36,15 @@ public class ResilienceJobs {
             ProcessingEngine processingEngine,
             TxnProperties properties,
             Clock clock,
-            PlatformTransactionManager transactionManager) {
+            PlatformTransactionManager transactionManager,
+            TxnEventLogger eventLogger) {
         this.transactionRepository = transactionRepository;
         this.accountRepository = accountRepository;
         this.processingEngine = processingEngine;
         this.properties = properties;
         this.clock = clock;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
+        this.eventLogger = eventLogger;
     }
 
     public void runDueRetries() {
@@ -81,6 +87,7 @@ public class ResilienceJobs {
                 && transaction.getReceivedAt().isBefore(cutoff)) {
             transaction.markFailed(FailureReason.SEQUENCE_TIMEOUT, clock.instant());
             transaction.setLastErrorMessage(null);
+            logAfterCommit("TXN_TIMEOUT", transaction);
         }
     }
 
@@ -98,6 +105,16 @@ public class ResilienceJobs {
                 && transaction.getStatus() == TransactionStatus.PROCESSING
                 && transaction.getUpdatedAt().isBefore(cutoff)) {
             transaction.markReclaimedForRetry(now);
+            logAfterCommit("TXN_LEASE_RECLAIMED", transaction);
         }
+    }
+
+    private void logAfterCommit(String event, TransactionRecord transaction) {
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                eventLogger.log(event, transaction);
+            }
+        });
     }
 }

@@ -9,8 +9,7 @@ import org.springframework.stereotype.Component;
 @ConditionalOnProperty(
         prefix = "txn.scheduling",
         name = "enabled",
-        havingValue = "true",
-        matchIfMissing = true)
+        havingValue = "true")
 public class ScheduledResilienceJobs {
 
     private final ResilienceJobs jobs;

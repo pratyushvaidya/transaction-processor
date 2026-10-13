@@ -15,11 +15,12 @@ class JsonFileTransactionSourceTests {
     private JsonFileTransactionSource source;
 
     @Test
-    void given_file_with_malformed_element_when_fetched_then_returns_null_fields_for_only_that_element() {
+    void given_file_with_missing_transaction_identifier_when_fetched_then_keeps_other_requests() {
         List<RawTransactionRequest> batch = source.fetchBatch();
 
-        assertThat(batch).hasSize(2);
-        assertThat(batch.get(0).transactionId()).isEqualTo("sample-1");
-        assertThat(batch.get(1)).isEqualTo(RawTransactionRequest.empty());
+        assertThat(batch).hasSize(10);
+        assertThat(batch.get(0).transactionId()).isEqualTo("TXN-2002");
+        assertThat(batch.get(9).transactionId()).isNull();
+        assertThat(batch.get(9).requestId()).isEqualTo("REQ-MALFORMED");
     }
 }

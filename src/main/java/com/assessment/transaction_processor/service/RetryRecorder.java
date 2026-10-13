@@ -4,6 +4,7 @@ import com.assessment.transaction_processor.entity.Account;
 import com.assessment.transaction_processor.entity.TransactionRecord;
 import com.assessment.transaction_processor.enums.FailureReason;
 import com.assessment.transaction_processor.enums.TransactionStatus;
+import com.assessment.transaction_processor.observability.TxnEventLogger;
 import com.assessment.transaction_processor.repository.AccountRepository;
 import com.assessment.transaction_processor.repository.TransactionRecordRepository;
 import java.time.Clock;
@@ -12,6 +13,8 @@ import java.util.Optional;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 @Service
 public class RetryRecorder {
@@ -20,16 +23,19 @@ public class RetryRecorder {
     private final TransactionRecordRepository transactionRepository;
     private final RetryPolicy retryPolicy;
     private final Clock clock;
+    private final TxnEventLogger eventLogger;
 
     public RetryRecorder(
             AccountRepository accountRepository,
             TransactionRecordRepository transactionRepository,
             RetryPolicy retryPolicy,
-            Clock clock) {
+            Clock clock,
+            TxnEventLogger eventLogger) {
         this.accountRepository = accountRepository;
         this.transactionRepository = transactionRepository;
         this.retryPolicy = retryPolicy;
         this.clock = clock;
+        this.eventLogger = eventLogger;
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -60,6 +66,15 @@ public class RetryRecorder {
             transaction.markAwaitingRetry(
                     retryPolicy.nextAttemptAt(now), now, safeFailureClassName(failure));
         }
+        String event = transaction.getStatus() == TransactionStatus.FAILED
+                ? "TXN_RETRY_EXHAUSTED"
+                : "TXN_RETRY_SCHEDULED";
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                eventLogger.log(event, transaction);
+            }
+        });
     }
 
     private static String safeFailureClassName(Throwable failure) {

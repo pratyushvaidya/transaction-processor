@@ -25,6 +25,8 @@ txn:
   scheduler:
     poll-interval: 5s
     enabled: true
+  scheduling:
+    enabled: true
   fault-injection:
     enabled: false
     failures: {}

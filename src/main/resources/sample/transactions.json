@@ -1,12 +1,91 @@
 [
   {
-    "transactionId": "sample-1",
-    "requestId": "sample-request-1",
-    "accountId": "sample-account",
+    "transactionId": "TXN-2002",
+    "requestId": "REQ-2",
+    "accountId": "ACC-201",
+    "transactionType": "DEBIT",
+    "amount": "40",
+    "currency": "USD",
+    "sequenceNumber": "2"
+  },
+  {
+    "transactionId": "TXN-2001",
+    "requestId": "REQ-1",
+    "accountId": "ACC-201",
     "transactionType": "CREDIT",
-    "amount": "25.00",
+    "amount": "100",
     "currency": "USD",
     "sequenceNumber": "1"
   },
-  null
+  {
+    "transactionId": "TXN-2002",
+    "requestId": "REQ-2-DUP",
+    "accountId": "ACC-201",
+    "transactionType": "DEBIT",
+    "amount": "40",
+    "currency": "USD",
+    "sequenceNumber": "2"
+  },
+  {
+    "transactionId": "TXN-2003",
+    "requestId": "REQ-3",
+    "accountId": "ACC-201",
+    "transactionType": "CREDIT",
+    "amount": "25",
+    "currency": "USD",
+    "sequenceNumber": "3"
+  },
+  {
+    "transactionId": "TXN-2004",
+    "requestId": "REQ-4",
+    "accountId": "ACC-202",
+    "transactionType": "DEBIT",
+    "amount": "-10",
+    "currency": "USD",
+    "sequenceNumber": "1"
+  },
+  {
+    "transactionId": "TXN-2005",
+    "requestId": "REQ-5",
+    "accountId": "ACC-203",
+    "transactionType": "CREDIT",
+    "amount": "500",
+    "currency": "USD",
+    "sequenceNumber": "1"
+  },
+  {
+    "transactionId": "TXN-2006",
+    "requestId": "REQ-6",
+    "accountId": "ACC-202",
+    "transactionType": "CREDIT",
+    "amount": "10",
+    "currency": "USD",
+    "sequenceNumber": "2"
+  },
+  {
+    "transactionId": "TXN-2007",
+    "requestId": "REQ-7",
+    "accountId": "ACC-204",
+    "transactionType": "DEBIT",
+    "amount": "50",
+    "currency": "USD",
+    "sequenceNumber": "1"
+  },
+  {
+    "transactionId": "TXN-2008",
+    "requestId": "REQ-8",
+    "accountId": "ACC-205",
+    "transactionType": "CREDIT",
+    "amount": "30",
+    "currency": "USD",
+    "sequenceNumber": "2"
+  },
+  {
+    "requestId": "REQ-MALFORMED",
+    "accountId": "ACC-206",
+    "transactionType": "CREDIT",
+    "amount": "1",
+    "currency": "USD",
+    "sequenceNumber": "1"
+  }
 ]
