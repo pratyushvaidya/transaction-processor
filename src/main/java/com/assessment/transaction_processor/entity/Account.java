@@ -49,4 +49,20 @@ public class Account {
     public long getVersion() {
         return version;
     }
+
+    public void applyCredit(BigDecimal amount) {
+        balance = balance.add(amount).setScale(2, RoundingMode.UNNECESSARY);
+    }
+
+    public void applyDebit(BigDecimal amount) {
+        BigDecimal updatedBalance = balance.subtract(amount).setScale(2, RoundingMode.UNNECESSARY);
+        if (updatedBalance.signum() < 0) {
+            throw new IllegalArgumentException("Account balance cannot become negative");
+        }
+        balance = updatedBalance;
+    }
+
+    public void advanceSequence() {
+        nextExpectedSeq = Math.addExact(nextExpectedSeq, 1L);
+    }
 }

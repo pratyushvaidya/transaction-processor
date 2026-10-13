@@ -166,4 +166,29 @@ public class TransactionRecord {
     public Instant getProcessedAt() {
         return processedAt;
     }
+
+    public void markProcessing(Instant at) {
+        status = TransactionStatus.PROCESSING;
+        pendingReason = null;
+        updatedAt = at;
+    }
+
+    public void markFailed(FailureReason reason, Instant at) {
+        status = TransactionStatus.FAILED;
+        pendingReason = null;
+        failureReason = reason;
+        updatedAt = at;
+    }
+
+    public void markProcessed(Instant at) {
+        status = TransactionStatus.PROCESSED;
+        pendingReason = null;
+        failureReason = null;
+        processedAt = at;
+        updatedAt = at;
+    }
+
+    public void setNextAttemptAt(Instant nextAttemptAt) {
+        this.nextAttemptAt = nextAttemptAt;
+    }
 }
