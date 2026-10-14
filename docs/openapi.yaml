@@ -1,0 +1,468 @@
+openapi: 3.0.3
+info:
+  title: Transaction Processor API
+  version: 1.0.0
+  description: |
+    REST API for the idempotent background transaction processor.
+
+    - Transactions are applied exactly once per `transactionId`; later arrivals
+      with the same id are reported as duplicates, even if the payload differs.
+    - Sequence numbers are scoped to an account. A transaction executes only when
+      its sequence equals the account's `nextExpectedSeq`; early arrivals wait.
+    - Errors contain only `code` and `message`. Stack traces are never returned.
+servers:
+  - url: http://localhost:8080
+    description: Local application (default or demo profile)
+tags:
+  - name: Transactions
+    description: Batch ingestion and transaction lookup
+  - name: Accounts
+    description: Account balance and sequence cursor
+  - name: Report
+    description: Processing report and integrity check
+paths:
+  /api/transactions:
+    post:
+      tags: [Transactions]
+      operationId: ingestTransactions
+      summary: Ingest a batch of raw transaction requests
+      description: |
+        Accepts a JSON array of raw request objects and returns one outcome per
+        record, in the same order. Each record is isolated, so one bad record does
+        not stop the batch.
+
+        Affected accounts are drained after ingestion writes commit. A `PENDING`
+        outcome therefore describes the ingestion decision: the transaction may
+        already be `PROCESSED` or `FAILED` by the time the response is returned.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/RawTransactionRequest'
+            example:
+              - transactionId: API-TXN-1
+                requestId: API-REQ-1
+                accountId: API-ACCOUNT
+                transactionType: CREDIT
+                amount: '25.00'
+                currency: USD
+                sequenceNumber: '1'
+      responses:
+        '200':
+          description: Per-record ingestion outcomes, in request order
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/IngestionOutcome'
+              example: [PENDING]
+        '400':
+          description: Malformed JSON or a null batch body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              example:
+                code: MALFORMED_REQUEST
+                message: Request body is invalid
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/transactions/{id}:
+    get:
+      tags: [Transactions]
+      operationId: getTransaction
+      summary: Get the persisted original transaction
+      description: Returns the stored transaction with its lifecycle, retry and outcome fields.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The transactionId
+          schema:
+            type: string
+          example: API-TXN-1
+      responses:
+        '200':
+          description: The transaction
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transaction'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/accounts/{id}:
+    get:
+      tags: [Accounts]
+      operationId: getAccount
+      summary: Get account state
+      description: Returns the current balance and sequence cursor of an account.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The accountId
+          schema:
+            type: string
+          example: API-ACCOUNT
+      responses:
+        '200':
+          description: The account
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Account'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/report:
+    get:
+      tags: [Report]
+      operationId: getReport
+      summary: Get the processing report
+      description: |
+        Returns counts by status and reason, duplicate and retry totals,
+        per-account summaries (including sequence gaps), rejected records with
+        safe messages, and a ledger/balance integrity result.
+      responses:
+        '200':
+          description: The processing report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProcessingReport'
+        '500':
+          $ref: '#/components/responses/InternalError'
+components:
+  responses:
+    NotFound:
+      description: The requested transaction or account does not exist
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          example:
+            code: NOT_FOUND
+            message: Requested resource was not found
+    InternalError:
+      description: Unexpected server error (generic body, no internal details)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          example:
+            code: INTERNAL_ERROR
+            message: An unexpected error occurred
+  schemas:
+    RawTransactionRequest:
+      type: object
+      description: |
+        A raw request as received. Every field is a string or null so that malformed
+        input can be represented; ingestion validates and converts the values.
+      properties:
+        transactionId:
+          type: string
+          nullable: true
+          description: Idempotency key. Required for a transaction to own a sequence slot.
+        requestId:
+          type: string
+          nullable: true
+          description: Request correlation identifier. Required by transaction validation.
+        accountId:
+          type: string
+          nullable: true
+          description: Account key. Required; must match `[A-Za-z0-9-]{1,32}`.
+          pattern: '^[A-Za-z0-9-]{1,32}$'
+        transactionType:
+          type: string
+          nullable: true
+          description: CREDIT or DEBIT.
+          enum: [CREDIT, DEBIT]
+        amount:
+          type: string
+          nullable: true
+          description: Positive decimal with at most two fractional digits.
+          example: '25.00'
+        currency:
+          type: string
+          nullable: true
+          description: Three uppercase letters.
+          pattern: '^[A-Z]{3}$'
+          example: USD
+        sequenceNumber:
+          type: string
+          nullable: true
+          description: Positive 64-bit integer, scoped to the account.
+          example: '1'
+    IngestionOutcome:
+      type: string
+      description: |
+        Ingestion decision for one record.
+        Invalid fields can produce FAILED while the record keeps its sequence slot.
+        Missing or unparseable transaction id, account or sequence produces a rejected record.
+      enum:
+        - PENDING
+        - FAILED
+        - DUPLICATE
+        - REJECTED_MALFORMED
+        - REJECTED_STALE_SEQUENCE
+        - REJECTED_SEQUENCE_CONFLICT
+    TransactionType:
+      type: string
+      enum: [CREDIT, DEBIT]
+    TransactionStatus:
+      type: string
+      enum: [PENDING, PROCESSING, PROCESSED, FAILED, DUPLICATE]
+    PendingReason:
+      type: string
+      description: Why a PENDING record is waiting.
+      enum: [AWAITING_SEQUENCE, AWAITING_RETRY]
+    FailureReason:
+      type: string
+      description: Failure category for FAILED transactions and rejected records.
+      enum:
+        - VALIDATION_FAILED
+        - INSUFFICIENT_FUNDS
+        - SEQUENCE_TIMEOUT
+        - RETRIES_EXHAUSTED
+        - STALE_SEQUENCE
+        - SEQUENCE_CONFLICT
+        - MALFORMED
+    Transaction:
+      type: object
+      description: The persisted original transaction. The first stored request stays authoritative.
+      required: [transactionId, accountId, sequenceNumber, status, attemptCount, receivedAt, updatedAt]
+      properties:
+        transactionId:
+          type: string
+          example: API-TXN-1
+        requestId:
+          type: string
+          nullable: true
+          example: API-REQ-1
+        accountId:
+          type: string
+          example: API-ACCOUNT
+        sequenceNumber:
+          type: integer
+          format: int64
+          example: 1
+        type:
+          allOf:
+            - $ref: '#/components/schemas/TransactionType'
+          nullable: true
+        amount:
+          type: number
+          nullable: true
+          example: 25.00
+        currency:
+          type: string
+          nullable: true
+          example: USD
+        status:
+          $ref: '#/components/schemas/TransactionStatus'
+        pendingReason:
+          allOf:
+            - $ref: '#/components/schemas/PendingReason'
+          nullable: true
+        failureReason:
+          allOf:
+            - $ref: '#/components/schemas/FailureReason'
+          nullable: true
+        attemptCount:
+          type: integer
+          description: Persisted execution and retry attempt count.
+          example: 1
+        nextAttemptAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Earliest time a retry can execute.
+        receivedAt:
+          type: string
+          format: date-time
+          description: Arrival time, used for pending-timeout checks.
+        updatedAt:
+          type: string
+          format: date-time
+        processedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Time of successful processing.
+    Account:
+      type: object
+      required: [accountId, balance, nextExpectedSeq, version]
+      properties:
+        accountId:
+          type: string
+          example: API-ACCOUNT
+        balance:
+          type: number
+          description: Current balance. Never negative.
+          example: 25.00
+        nextExpectedSeq:
+          type: integer
+          format: int64
+          description: Next sequence number eligible for processing.
+          example: 2
+        version:
+          type: integer
+          format: int64
+          description: Optimistic-locking version.
+          example: 2
+    GapRange:
+      type: object
+      description: Inclusive range of missing sequence numbers.
+      required: [from, to]
+      properties:
+        from:
+          type: integer
+          format: int64
+          example: 1
+        to:
+          type: integer
+          format: int64
+          example: 1
+    AccountSummary:
+      type: object
+      required: [accountId, balance, nextExpectedSeq, pendingCount, gaps, oldestPendingAge]
+      properties:
+        accountId:
+          type: string
+          example: ACC-205
+        balance:
+          type: number
+          example: 0.00
+        nextExpectedSeq:
+          type: integer
+          format: int64
+          example: 1
+        pendingCount:
+          type: integer
+          example: 0
+        gaps:
+          type: array
+          description: Missing sequence ranges, inclusive.
+          items:
+            $ref: '#/components/schemas/GapRange'
+        oldestPendingAge:
+          type: string
+          description: ISO-8601 duration (serialized Java Duration).
+          example: PT0S
+    RejectedRecord:
+      type: object
+      description: |
+        A record that cannot own a sequence slot. Counted in failed totals;
+        only a safe diagnostic message is exposed.
+      required: [id, failureReason, safeMessage, receivedAt]
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        transactionId:
+          type: string
+          nullable: true
+        requestId:
+          type: string
+          nullable: true
+          example: REQ-MALFORMED
+        accountId:
+          type: string
+          nullable: true
+          example: ACC-206
+        sequenceNumber:
+          type: integer
+          format: int64
+          nullable: true
+          example: 1
+        failureReason:
+          $ref: '#/components/schemas/FailureReason'
+        safeMessage:
+          type: string
+          example: Required transaction identifiers are missing or invalid
+        receivedAt:
+          type: string
+          format: date-time
+    ProcessingReport:
+      type: object
+      required:
+        - countsByStatus
+        - pendingByReason
+        - failedByReason
+        - duplicateCount
+        - retriedTransactions
+        - totalRetryAttempts
+        - accounts
+        - rejectedRecords
+        - ledgerBalancesMatch
+      properties:
+        countsByStatus:
+          type: object
+          description: Counts keyed by TransactionStatus.
+          additionalProperties:
+            type: integer
+          example:
+            PENDING: 0
+            PROCESSING: 0
+            PROCESSED: 5
+            FAILED: 4
+            DUPLICATE: 1
+        pendingByReason:
+          type: object
+          description: Pending counts keyed by PendingReason.
+          additionalProperties:
+            type: integer
+          example: {}
+        failedByReason:
+          type: object
+          description: |
+            Failed counts keyed by FailureReason. Rejected records are included
+            in these totals.
+          additionalProperties:
+            type: integer
+          example:
+            MALFORMED: 1
+            INSUFFICIENT_FUNDS: 1
+            SEQUENCE_TIMEOUT: 1
+            VALIDATION_FAILED: 1
+        duplicateCount:
+          type: integer
+          example: 1
+        retriedTransactions:
+          type: integer
+          example: 1
+        totalRetryAttempts:
+          type: integer
+          example: 1
+        accounts:
+          type: array
+          items:
+            $ref: '#/components/schemas/AccountSummary'
+        rejectedRecords:
+          type: array
+          items:
+            $ref: '#/components/schemas/RejectedRecord'
+        ledgerBalancesMatch:
+          type: boolean
+          description: |
+            Integrity check: each account's balance equals the signed sum of its
+            ledger amounts (credits positive, debits negative).
+          example: true
+    ApiError:
+      type: object
+      description: Error body. Contains only a code and a safe message.
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum: [MALFORMED_REQUEST, NOT_FOUND, INTERNAL_ERROR]
+        message:
+          type: string
