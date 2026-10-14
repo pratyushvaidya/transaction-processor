@@ -6,6 +6,8 @@ A Java 17 / Spring Boot service that ingests duplicate and out-of-order account 
 
 Run the tests with `./mvnw test`. To run the demonstration, use `./mvnw spring-boot:run -Dspring-boot.run.profiles=demo` (on Windows, use `mvnw.cmd`). The demonstration reads [`src/main/resources/sample/transactions.json`](src/main/resources/sample/transactions.json), waits for retries and sequence timeouts, prints a report, and writes JSON to `output/processing-report.json`. The captured text report is in [`docs/sample-output.txt`](docs/sample-output.txt).
 
+Detailed [execution instructions, sample input/output, and API request/response models](docs/USAGE-AND-API.md) are available in `docs/USAGE-AND-API.md`.
+
 ## DESIGN NOTE
 
 ### Architecture
